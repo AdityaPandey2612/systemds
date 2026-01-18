@@ -26,7 +26,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 public class BuiltinAutoencoderGeneralizedTest extends AutomatedTestBase {
-    private static final String TEST_NAME = "autoencoder_generalized";
+    private static final String TEST_NAME = "autoencoderGeneralized";
     private static final String TEST_DIR = "functions/builtin/";
     private static final String TEST_CLASS_DIR = TEST_DIR + BuiltinAutoencoderGeneralizedTest.class.getSimpleName() + "/";
 
