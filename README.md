@@ -47,6 +47,7 @@ To build from source visit [SystemDS Install from source](https://apache.github.
 [![Monthly PyPI downloads](https://static.pepy.tech/personalized-badge/systemds?units=abbreviation&left_color=grey&right_color=blue&left_text=Monthly%20PyPI%20Downloads)](https://pepy.tech/project/systemds)
 
 
+
 ## Term Project Plan: OOC Operator Extensions
 
 
@@ -80,6 +81,33 @@ All team members should review each other's code weekly. Each major task should 
 | Performance tests | Include performance test code in the PR, not only benchmark numbers. |
 | PR timing | Open a draft PR early enough for TA review; target end of Week 3. |
 | PR description | Include tests run, benchmark setup, benchmark numbers, and known limitations. |
+
+### What Changed from the Six-Week Plan
+
+Nothing essential was removed from the implementation scope except Spark benchmarking. The six-week plan was compressed by merging setup, implementation, benchmark, and PR cleanup work into tighter weekly milestones.
+
+| Old Plan Item | Updated Status |
+| --- | --- |
+| Covariance OOC implementation | Kept. Still includes `cov(A, B)` and `cov(A, B, W)`. |
+| TSMM arbitrary-dimension support | Kept and expanded. Both `t(X) %*% X` and `X %*% t(X)` are now required. |
+| Test-first approach | Strengthened. Every feature starts with failing tests against CP output. |
+| Dense and sparse correctness tests | Kept. |
+| Invalid-dimension and error-handling tests | Kept. |
+| Benchmarking | Kept, but narrowed to CP vs OOC. |
+| Spark benchmarks | Removed from scope after TA feedback. |
+| Performance test code | Strengthened. Performance tests should be included in the PR. |
+| Week 5 benchmark-only phase | Merged into Week 3 and Week 4. |
+| Week 6 polish-only phase | Merged into Week 4. |
+| Final buffer week | Replaced by early draft PR at the end of Week 3 and TA feedback cleanup in Week 4. |
+
+### Four-Week Deliverables by Person
+
+| Week | Person A: Covariance Lead | Person B: TSMM Lead | Person C: Testing, Benchmarking, and PR Coordination |
+| --- | --- | --- | --- |
+| Week 1 | Write failing OOC tests for `cov(A, B)`; study CP/Spark covariance and OOC central moment references; start `CovarianceOOCInstruction.java`; wire initial parser support. | Write failing multi-tile tests for both `t(X) %*% X` and `X %*% t(X)`; study `TSMMOOCInstruction`, `MMultOOCInstruction`, and `Tsmm2SPInstruction`; document LEFT/RIGHT output indexing. | Verify setup and code style; add first OOC covariance DML script; define CP-vs-OOC benchmark matrix sizes, sparsities, and block sizes; verify all new tests fail for the expected reason. |
+| Week 2 | Complete unweighted covariance; implement weighted `cov(A, B, W)`; add stream joins, `CmCovObject` reduction, dimension checks, and block-size validation. | Remove the single-output-block limitation; produce diagonal and off-diagonal output tiles; implement LEFT and RIGHT TSMM indexing prototype. | Add weighted covariance DML/test files; compare covariance OOC against CP; create performance test skeleton in the existing Java performance test area. |
+| Week 3 | Stabilize covariance; add dense/sparse, weighted/unweighted, and error-handling tests; verify covariance OOC heavy hitters; review TSMM implementation. | Complete LEFT and RIGHT multi-block TSMM; verify output metadata and symmetric off-diagonal tiles; review covariance implementation. | Extend `TransposeSelfMMTest`; run focused correctness tests; implement CP-vs-OOC performance tests; collect preliminary numbers; open draft PR and request TA review. |
+| Week 4 | Address covariance feedback; finalize tests; remove debug code; check comments and style. | Address TSMM feedback; finalize helper methods, memory behavior, and output metadata handling. | Run final correctness tests and warm-up benchmarks; update PR description with final tables, tests run, limitations, and final submission notes. |
 
 ### Relevant Source Files
 
