@@ -87,7 +87,7 @@ public class TSMMOOCInstruction extends ComputationOOCInstruction {
 
 		BinaryOperator plus = InstructionUtils.parseBinaryOperator(Opcodes.PLUS.toString());
 		CompletableFuture<Void> outFuture = groupedReduceOOC(partials, out, (left, right) -> {
-			MatrixBlock result = ((MatrixBlock) left.getValue()).binaryOperationsInPlace(plus, right.getValue());
+			MatrixBlock result = ((MatrixBlock) left.getValue()).binaryOperations(plus, right.getValue());
 			left.setValue(result);
 			return left;
 		}, partialsPerOutput);
