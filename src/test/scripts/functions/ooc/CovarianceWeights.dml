@@ -18,11 +18,10 @@
 # under the License.
 #
 #-------------------------------------------------------------
-
 A = read($1);
 B = read($2);
+W = read($3);
+s = cov(A, B, W);
+m = as.matrix(s);
 
-s = cov(A, B);
-res = as.matrix(s);
-
-write(res, $3, format="binary");
+write(m, $4, format="text");
