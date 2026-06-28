@@ -21,6 +21,7 @@ package org.apache.sysds.test.functions.ooc;
 
 import org.apache.sysds.common.Opcodes;
 import org.apache.sysds.common.Types;
+import org.apache.sysds.conf.DMLConfig;
 import org.apache.sysds.lops.MMTSJ.MMTSJType;
 import org.apache.sysds.runtime.instructions.Instruction;
 import org.apache.sysds.runtime.io.MatrixWriter;
@@ -36,6 +37,8 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 public class TransposeSelfMMTest extends AutomatedTestBase {
 	private static final String TEST_NAME_LEFT = "TSMM";
@@ -50,9 +53,9 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 	private static final int SINGLE_TILE_ROWS = 2143;
 	private static final int SINGLE_TILE_COLS = 123;
 	private static final int SINGLE_TILE_BLOCK_SIZE = 1000;
-	private static final int MULTI_TILE_ROWS = 1003;
-	private static final int MULTI_TILE_COLS = 1007;
-	private static final int MULTI_TILE_BLOCK_SIZE = 1000;
+	private static final int MULTI_TILE_ROWS = 1501;
+	private static final int MULTI_TILE_COLS = 1301;
+	private static final int MULTI_TILE_BLOCK_SIZE = 500;
 	private final static double sparsity1 = 0.7;
 	private final static double sparsity2 = 0.1;
 
@@ -79,8 +82,18 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 	}
 
 	@Test
+	public void testTsmmLeftSparseMultiTile() {
+		runTSMMTest(MMTSJType.LEFT, MULTI_TILE_ROWS, MULTI_TILE_COLS, MULTI_TILE_BLOCK_SIZE, true);
+	}
+
+	@Test
 	public void testTsmmRightDenseMultiTile() {
 		runTSMMTest(MMTSJType.RIGHT, MULTI_TILE_ROWS, MULTI_TILE_COLS, MULTI_TILE_BLOCK_SIZE, false);
+	}
+
+	@Test
+	public void testTsmmRightSparseMultiTile() {
+		runTSMMTest(MMTSJType.RIGHT, MULTI_TILE_ROWS, MULTI_TILE_COLS, MULTI_TILE_BLOCK_SIZE, true);
 	}
 
 	private void runTSMMTest(MMTSJType type, int rows, int cols, int blockSize, boolean sparse) {
@@ -89,6 +102,7 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 		try {
 			String testName = type.isLeft() ? TEST_NAME_LEFT : TEST_NAME_RIGHT;
 			getAndLoadTestConfiguration(testName);
+			setDefaultBlockSizeInConfig(blockSize);
 			String HOME = SCRIPT_DIR + TEST_DIR;
 			fullDMLScriptName = HOME + testName + ".dml";
 
@@ -110,11 +124,18 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 				heavyHittersContainsString(Instruction.OOC_INST_PREFIX + Opcodes.TSMM));
 
 			int outputDim = type.isLeft() ? cols : rows;
+			MatrixCharacteristics meta = readDMLMetaDataFile(OUTPUT_NAME_OOC);
+			Assert.assertEquals(outputDim, meta.getRows());
+			Assert.assertEquals(outputDim, meta.getCols());
+			Assert.assertEquals(blockSize, meta.getBlocksize());
+			assertDeepMultiTileOutput(meta);
+
 			MatrixBlock actual = DataConverter.readMatrixFromHDFS(output(OUTPUT_NAME_OOC),
 				Types.FileFormat.BINARY, outputDim, outputDim, blockSize);
 			MatrixBlock expected = DataConverter.readMatrixFromHDFS(output(OUTPUT_NAME_CP),
 				Types.FileFormat.BINARY, outputDim, outputDim, blockSize);
 			TestUtils.compareMatrices(actual, expected, eps);
+			assertSymmetricOffDiagonal(actual, outputDim, blockSize);
 		}
 		catch (IOException e) {
 			throw new RuntimeException(e);
@@ -122,5 +143,32 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 		finally {
 			resetExecMode(platformOld);
 		}
+	}
+
+	private static void assertSymmetricOffDiagonal(MatrixBlock actual, int outputDim, int blockSize) {
+		if(outputDim <= blockSize)
+			return;
+
+		int[] rows = new int[] {0, Math.min(blockSize - 1, outputDim - 1)};
+		int[] cols = new int[] {blockSize, outputDim - 1};
+		for(int row : rows)
+			for(int col : cols)
+				Assert.assertEquals(actual.get(row, col), actual.get(col, row), eps);
+	}
+
+	private static void assertDeepMultiTileOutput(MatrixCharacteristics meta) {
+		if(meta.getRows() <= meta.getBlocksize())
+			return;
+
+		Assert.assertTrue("Multi-tile TSMM tests should cover at least three output row blocks",
+			meta.getNumRowBlocks() >= 3);
+		Assert.assertTrue("Multi-tile TSMM tests should cover at least three output column blocks",
+			meta.getNumColBlocks() >= 3);
+	}
+
+	private void setDefaultBlockSizeInConfig(int blockSize) throws IOException {
+		DMLConfig config = new DMLConfig(getCurConfigFile().getPath());
+		config.setTextValue(DMLConfig.DEFAULT_BLOCK_SIZE, String.valueOf(blockSize));
+		Files.write(getCurConfigFile().toPath(), config.serializeDMLConfig().getBytes(StandardCharsets.UTF_8));
 	}
 }
