@@ -1,0 +1,22 @@
+# OOC TSMM benchmark script
+# Run once in CP mode and once in OOC mode.
+# Arguments:
+# $1 rows
+# $2 cols
+# $3 sparsity
+# $4 side: 0 = t(X)%*%X, 1 = X%*%t(X)
+
+rows = as.integer($1)
+cols = as.integer($2)
+sparsity = as.double($3)
+side = as.integer($4)
+
+X = rand(rows=rows, cols=cols, min=0, max=1, sparsity=sparsity, seed=31)
+
+if (side == 0) {
+    R = t(X) %*% X
+} else {
+    R = X %*% t(X)
+}
+
+print(sum(R))
