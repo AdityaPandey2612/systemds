@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import org.apache.sysds.common.Opcodes;
 import org.apache.sysds.lops.MMTSJ;
 import org.apache.sysds.lops.MMTSJ.MMTSJType;
+import org.apache.sysds.runtime.DMLRuntimeException;
 import org.apache.sysds.runtime.controlprogram.caching.MatrixObject;
 import org.apache.sysds.runtime.controlprogram.context.ExecutionContext;
 import org.apache.sysds.runtime.functionobjects.Multiply;
@@ -71,19 +72,20 @@ public class TSMMOOCInstruction extends ComputationOOCInstruction {
 		int partialsPerOutput = _type.isLeft() ? numRowBlocks : numColBlocks;
 
 		OOCStreamable<IndexedMatrixValue> inputStreamable = min.getStreamable();
-		boolean createdCache = !inputStreamable.hasStreamCache();
-		CachingStream inputCache = createdCache ? new CachingStream(min.getStreamHandle())
+		final boolean createdCache = !inputStreamable.hasStreamCache();
+		final CachingStream inputCache = createdCache ? new CachingStream(min.getStreamHandle())
 			: inputStreamable.getStreamCache();
 
 		OOCStream<List<IndexedMatrixValue>> groupedPartials = createWritableStream();
 		OOCStream<IndexedMatrixValue> partials = createWritableStream();
 		OOCStream<IndexedMatrixValue> out = createWritableStream();
+		addOutStream(out);
 		ec.getMatrixObject(output).setStreamHandle(out);
 
-		joinManyOOC(inputCache.getReadStream(), inputCache.getReadStream(), groupedPartials,
+		CompletableFuture<Void> joinFuture = joinManyOOC(inputCache.getReadStream(), inputCache.getReadStream(), groupedPartials,
 			this::createPartialOutputTiles, this::getJoinIndex, this::getJoinIndex,
 			blocksPerJoinGroup, blocksPerJoinGroup);
-		expandOOC(groupedPartials, partials, values -> values);
+		CompletableFuture<Void> expandFuture = expandOOC(groupedPartials, partials, values -> values);
 
 		BinaryOperator plus = InstructionUtils.parseBinaryOperator(Opcodes.PLUS.toString());
 		CompletableFuture<Void> outFuture = groupedReduceOOC(partials, out, (left, right) -> {
@@ -91,6 +93,8 @@ public class TSMMOOCInstruction extends ComputationOOCInstruction {
 			left.setValue(result);
 			return left;
 		}, partialsPerOutput);
+
+		propagateFailuresToOutput(out, List.of(joinFuture, expandFuture, outFuture));
 
 		outFuture.whenComplete((result, error) -> {
 			if(createdCache)
@@ -119,21 +123,31 @@ public class TSMMOOCInstruction extends ComputationOOCInstruction {
 			return List.of(new IndexedMatrixValue(new MatrixIndexes(leftIndex, rightIndex), diagonal));
 		}
 
-		MatrixBlock partial;
-		if(_type.isLeft()) {
-			MatrixBlock leftTranspose = LibMatrixReorg.transpose(leftBlock);
-			partial = leftTranspose.aggregateBinaryOperations(leftTranspose, rightBlock, new MatrixBlock(),
-				(AggregateBinaryOperator) _optr);
-		}
-		else {
-			MatrixBlock rightTranspose = LibMatrixReorg.transpose(rightBlock);
-			partial = leftBlock.aggregateBinaryOperations(leftBlock, rightTranspose, new MatrixBlock(),
-				(AggregateBinaryOperator) _optr);
-		}
-
+		MatrixBlock partial = multiplyOffDiagonal(leftBlock, rightBlock);
 		MatrixBlock mirror = LibMatrixReorg.transpose(partial);
 		return List.of(
 			new IndexedMatrixValue(new MatrixIndexes(leftIndex, rightIndex), partial),
 			new IndexedMatrixValue(new MatrixIndexes(rightIndex, leftIndex), mirror));
+	}
+
+	private MatrixBlock multiplyOffDiagonal(MatrixBlock leftBlock, MatrixBlock rightBlock) {
+		if(_type.isLeft()) {
+			MatrixBlock leftTranspose = LibMatrixReorg.transpose(leftBlock);
+			return leftTranspose.aggregateBinaryOperations(leftTranspose, rightBlock, new MatrixBlock(),
+				(AggregateBinaryOperator) _optr);
+		}
+
+		MatrixBlock rightTranspose = LibMatrixReorg.transpose(rightBlock);
+		return leftBlock.aggregateBinaryOperations(leftBlock, rightTranspose, new MatrixBlock(),
+			(AggregateBinaryOperator) _optr);
+	}
+
+	private static void propagateFailuresToOutput(OOCStream<?> out, List<CompletableFuture<Void>> futures) {
+		for(CompletableFuture<Void> future : futures) {
+			future.exceptionally(error -> {
+				out.propagateFailure(DMLRuntimeException.of(error));
+				return null;
+			});
+		}
 	}
 }
