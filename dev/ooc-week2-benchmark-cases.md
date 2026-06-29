@@ -1,5 +1,6 @@
 # Week 2 OOC Benchmark Cases
 
+
 ## Scope
 
 Local CP vs local OOC only. Spark and cluster benchmarking are out of scope.

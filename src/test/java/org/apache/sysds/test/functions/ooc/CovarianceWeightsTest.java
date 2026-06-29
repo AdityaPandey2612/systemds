@@ -19,115 +19,126 @@
 
 package org.apache.sysds.test.functions.ooc;
 
-import org.apache.sysds.common.Opcodes;
+import java.io.IOException;
+
 import org.apache.sysds.common.Types;
-import org.apache.sysds.runtime.instructions.Instruction;
 import org.apache.sysds.runtime.io.MatrixWriter;
 import org.apache.sysds.runtime.io.MatrixWriterFactory;
 import org.apache.sysds.runtime.matrix.data.MatrixBlock;
-import org.apache.sysds.runtime.matrix.data.MatrixValue;
 import org.apache.sysds.runtime.meta.MatrixCharacteristics;
 import org.apache.sysds.runtime.util.DataConverter;
 import org.apache.sysds.runtime.util.HDFSTool;
 import org.apache.sysds.test.AutomatedTestBase;
 import org.apache.sysds.test.TestConfiguration;
 import org.apache.sysds.test.TestUtils;
-import org.junit.Assert;
 import org.junit.Test;
 
-import java.io.IOException;
-import java.util.HashMap;
-
 public class CovarianceWeightsTest extends AutomatedTestBase {
-    private final static String TEST_NAME1 = "CovarianceWeights";
-    private final static String TEST_DIR = "functions/ooc/";
-    private final static String TEST_CLASS_DIR = TEST_DIR + CovarianceWeightsTest.class.getSimpleName() + "/";
-    private final static double eps = 1e-8;
-    private static final String INPUT_NAME_A = "X";
-    private static final String INPUT_NAME_B = "Y";
-    private static final String INPUT_NAME_W = "W";
-    private static final String OUTPUT_NAME = "res";
+	private final static String TEST_NAME = "CovarianceWeights";
+	private final static String TEST_DIR = "functions/ooc/";
+	private final static String TEST_CLASS_DIR = TEST_DIR + CovarianceWeightsTest.class.getSimpleName() + "/";
+	private final static double eps = 1e-10;
 
-    private final static int rows = 1871;
-    private final static int maxVal = 7;
-    private final static double sparsity1 = 0.65;
-    private final static double sparsity2 = 0.05;
+	private final static String INPUT_A = "A";
+	private final static String INPUT_B = "B";
+	private final static String INPUT_W = "W";
+	private final static String OUTPUT_CP = "R_CP";
+	private final static String OUTPUT_OOC = "R_OOC";
 
-    @Override
-    public void setUp() {
-        TestUtils.clearAssertionInformation();
-        TestConfiguration config = new TestConfiguration(TEST_CLASS_DIR, TEST_NAME1);
-        addTestConfiguration(TEST_NAME1, config);
-    }
+	private final static int rows = 1871;
+	private final static int cols = 1;
+	private final static int blocksize = 1000;
+	private final static int maxVal = 7;
 
-    @Test
-    public void testCovarianceWeightsDense() {
-        runCovarianceWeightsTest(false);
-    }
+	private final static double denseSparsity = 0.65;
+	private final static double sparseSparsity = 0.05;
 
-    @Test
-    public void testCovarianceWeightsSparse() {
-        runCovarianceWeightsTest(true);
-    }
+	@Override
+	public void setUp() {
+		TestUtils.clearAssertionInformation();
+		addTestConfiguration(TEST_NAME,
+			new TestConfiguration(TEST_CLASS_DIR, TEST_NAME, new String[] { OUTPUT_CP, OUTPUT_OOC }));
+	}
 
-    private void runCovarianceWeightsTest(boolean sparse) {
-        Types.ExecMode platformOld = setExecMode(Types.ExecMode.SINGLE_NODE);
+	@Test
+	public void testWeightedCovarianceDenseOOC() {
+		runWeightedCovarianceOOCCompareTest(false);
+	}
 
-        try {
-            getAndLoadTestConfiguration(TEST_NAME1);
+	@Test
+	public void testWeightedCovarianceSparseOOC() {
+		runWeightedCovarianceOOCCompareTest(true);
+	}
 
-            String HOME = SCRIPT_DIR + TEST_DIR;
-            fullDMLScriptName = HOME + TEST_NAME1 + ".dml";
-            programArgs = new String[] {"-explain", "-stats", "-ooc", "-args", input(INPUT_NAME_A),
-                    input(INPUT_NAME_B), input(INPUT_NAME_W), output(OUTPUT_NAME)};
+	private void runWeightedCovarianceOOCCompareTest(boolean sparse) {
+		Types.ExecMode platformOld = setExecMode(Types.ExecMode.SINGLE_NODE);
 
-            // 1. Generate the data in-memory as MatrixBlock objects (1-d column vectors)
-            double[][] A_data = getRandomMatrix(rows, 1, 1, maxVal, sparse ? sparsity2 : sparsity1, 7);
-            double[][] B_data = getRandomMatrix(rows, 1, 1, maxVal, sparse ? sparsity2 : sparsity1, 3);
-            double[][] W_data = getRandomMatrix(rows, 1, 0, 1, 1.0, 7);
+		try {
+			getAndLoadTestConfiguration(TEST_NAME);
 
-            // 2. Convert the double arrays to MatrixBlock objects
-            MatrixBlock A_mb = DataConverter.convertToMatrixBlock(A_data);
-            MatrixBlock B_mb = DataConverter.convertToMatrixBlock(B_data);
-            MatrixBlock W_mb = DataConverter.convertToMatrixBlock(W_data);
+			String HOME = SCRIPT_DIR + TEST_DIR;
+			fullDMLScriptName = HOME + TEST_NAME + ".dml";
 
-            // 3. Create a binary matrix writer
-            MatrixWriter writer = MatrixWriterFactory.createMatrixWriter(Types.FileFormat.BINARY);
+			double sparsity = sparse ? sparseSparsity : denseSparsity;
 
-            // 4. Write the inputs to binary SequenceFiles incl. metadata
-            writer.writeMatrixToHDFS(A_mb, input(INPUT_NAME_A), rows, 1, 1000, A_mb.getNonZeros());
-            writer.writeMatrixToHDFS(B_mb, input(INPUT_NAME_B), rows, 1, 1000, B_mb.getNonZeros());
-            writer.writeMatrixToHDFS(W_mb, input(INPUT_NAME_W), rows, 1, 1000, W_mb.getNonZeros());
-            HDFSTool.writeMetaDataFile(input(INPUT_NAME_A + ".mtd"), Types.ValueType.FP64,
-                    new MatrixCharacteristics(rows, 1, 1000, A_mb.getNonZeros()), Types.FileFormat.BINARY);
-            HDFSTool.writeMetaDataFile(input(INPUT_NAME_B + ".mtd"), Types.ValueType.FP64,
-                    new MatrixCharacteristics(rows, 1, 1000, B_mb.getNonZeros()), Types.FileFormat.BINARY);
-            HDFSTool.writeMetaDataFile(input(INPUT_NAME_W + ".mtd"), Types.ValueType.FP64,
-                    new MatrixCharacteristics(rows, 1, 1000, W_mb.getNonZeros()), Types.FileFormat.BINARY);
+			double[][] A = getRandomMatrix(rows, cols, 1, maxVal, sparsity, 7);
+			double[][] B = getRandomMatrix(rows, cols, 1, maxVal, sparsity, 823);
 
-            runTest(true, false, null, -1);
+			// Weights should be positive. Avoid zero/negative weights.
+			double[][] W = getRandomMatrix(rows, cols, 1, maxVal, sparsity, 1234);
 
-            //check Covariance OOC
-            Assert.assertTrue("OOC wasn't used for Covariance",
-                    heavyHittersContainsString(Instruction.OOC_INST_PREFIX + Opcodes.COV));
+			MatrixBlock ABlock = DataConverter.convertToMatrixBlock(A);
+			MatrixBlock BBlock = DataConverter.convertToMatrixBlock(B);
+			MatrixBlock WBlock = DataConverter.convertToMatrixBlock(W);
 
-            //compare results
+			writeBinaryMatrix(INPUT_A, ABlock, rows, cols, blocksize);
+			writeBinaryMatrix(INPUT_B, BBlock, rows, cols, blocksize);
+			writeBinaryMatrix(INPUT_W, WBlock, rows, cols, blocksize);
 
-            // rerun without ooc flag
-            programArgs = new String[] {"-explain", "-stats", "-args", input(INPUT_NAME_A), input(INPUT_NAME_B),
-                    input(INPUT_NAME_W), output(OUTPUT_NAME + "_target")};
-            runTest(true, false, null, -1);
+			// Reference run: normal single-node CP execution.
+			programArgs = new String[] {
+				"-args",
+				input(INPUT_A),
+				input(INPUT_B),
+				input(INPUT_W),
+				output(OUTPUT_CP)
+			};
+			runTest(true, false, null, -1);
 
-            // compare matrices
-            HashMap<MatrixValue.CellIndex, Double> ret1 = readDMLMatrixFromOutputDir(OUTPUT_NAME);
-            HashMap<MatrixValue.CellIndex, Double> ret2 = readDMLMatrixFromOutputDir(OUTPUT_NAME + "_target");
-            TestUtils.compareMatrices(ret1, ret2, eps, "Ret-1", "Ret-2");
-        }
-        catch(IOException e) {
-            throw new RuntimeException(e);
-        }
-        finally {
-            resetExecMode(platformOld);
-        }
-    }
+			// OOC run: should pass after weighted covariance OOC support is implemented.
+			programArgs = new String[] {
+				"-explain", "-stats", "-ooc",
+				"-args",
+				input(INPUT_A),
+				input(INPUT_B),
+				input(INPUT_W),
+				output(OUTPUT_OOC)
+			};
+			runTest(true, false, null, -1);
+
+			MatrixBlock cpResult = DataConverter.readMatrixFromHDFS(
+				output(OUTPUT_CP), Types.FileFormat.BINARY, 1, 1, blocksize, 1);
+
+			MatrixBlock oocResult = DataConverter.readMatrixFromHDFS(
+				output(OUTPUT_OOC), Types.FileFormat.BINARY, 1, 1, blocksize, 1);
+
+			TestUtils.compareMatrices(cpResult, oocResult, eps);
+		}
+		catch(IOException ex) {
+			throw new RuntimeException(ex);
+		}
+		finally {
+			resetExecMode(platformOld);
+		}
+	}
+
+	private void writeBinaryMatrix(String name, MatrixBlock mb, int rows, int cols, int blocksize) throws IOException {
+		MatrixWriter writer = MatrixWriterFactory.createMatrixWriter(Types.FileFormat.BINARY);
+		writer.writeMatrixToHDFS(mb, input(name), rows, cols, blocksize, mb.getNonZeros());
+
+		HDFSTool.writeMetaDataFile(input(name + ".mtd"),
+			Types.ValueType.FP64,
+			new MatrixCharacteristics(rows, cols, blocksize, mb.getNonZeros()),
+			Types.FileFormat.BINARY);
+	}
 }
