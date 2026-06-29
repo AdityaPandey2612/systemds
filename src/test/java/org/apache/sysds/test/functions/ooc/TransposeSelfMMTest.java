@@ -77,6 +77,11 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 	}
 
 	@Test
+	public void testTsmmRightDenseSingleTile() {
+		runTSMMTest(MMTSJType.RIGHT, SINGLE_TILE_COLS, SINGLE_TILE_ROWS, SINGLE_TILE_BLOCK_SIZE, false);
+	}
+
+	@Test
 	public void testTsmmLeftDenseMultiTile() {
 		runTSMMTest(MMTSJType.LEFT, MULTI_TILE_ROWS, MULTI_TILE_COLS, MULTI_TILE_BLOCK_SIZE, false);
 	}
@@ -123,11 +128,8 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 			Assert.assertTrue("OOC wasn't used for TSMM",
 				heavyHittersContainsString(Instruction.OOC_INST_PREFIX + Opcodes.TSMM));
 
-			int outputDim = type.isLeft() ? cols : rows;
 			MatrixCharacteristics meta = readDMLMetaDataFile(OUTPUT_NAME_OOC);
-			Assert.assertEquals(outputDim, meta.getRows());
-			Assert.assertEquals(outputDim, meta.getCols());
-			Assert.assertEquals(blockSize, meta.getBlocksize());
+			int outputDim = assertOutputMetadata(type, meta, rows, cols, blockSize);
 			assertDeepMultiTileOutput(meta);
 
 			MatrixBlock actual = DataConverter.readMatrixFromHDFS(output(OUTPUT_NAME_OOC),
@@ -143,6 +145,15 @@ public class TransposeSelfMMTest extends AutomatedTestBase {
 		finally {
 			resetExecMode(platformOld);
 		}
+	}
+
+	private static int assertOutputMetadata(MMTSJType type, MatrixCharacteristics meta, int inputRows, int inputCols,
+		int blockSize) {
+		int outputDim = type.isLeft() ? inputCols : inputRows;
+		Assert.assertEquals(type + " TSMM output row metadata", outputDim, meta.getRows());
+		Assert.assertEquals(type + " TSMM output column metadata", outputDim, meta.getCols());
+		Assert.assertEquals(type + " TSMM output blocksize metadata", blockSize, meta.getBlocksize());
+		return outputDim;
 	}
 
 	private static void assertSymmetricOffDiagonal(MatrixBlock actual, int outputDim, int blockSize) {
