@@ -1,0 +1,22 @@
+# OOC covariance benchmark script
+# Run once in CP mode and once in OOC mode.
+# Arguments:
+# $1 rows
+# $2 sparsity
+# $3 weighted: 0 = cov(A,B), 1 = cov(A,B,W)
+
+rows = as.integer($1)
+sparsity = as.double($2)
+weighted = as.integer($3)
+
+A = rand(rows=rows, cols=1, min=0, max=1, sparsity=sparsity, seed=7)
+B = rand(rows=rows, cols=1, min=0, max=1, sparsity=sparsity, seed=13)
+
+if (weighted == 1) {
+    W = rand(rows=rows, cols=1, min=1, max=2, sparsity=sparsity, seed=21)
+    R = cov(A, B, W)
+} else {
+    R = cov(A, B)
+}
+
+print(R)
