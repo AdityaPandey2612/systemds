@@ -38,20 +38,18 @@ import org.apache.sysds.runtime.meta.MetaDataFormat;
 import org.apache.sysds.runtime.ooc.cache.OOCCacheManager;
 import org.apache.sysds.runtime.ooc.planning.OOCMaterializedInputRequest;
 import org.apache.sysds.runtime.ooc.primitives.GeneralMMultOOCPrimitive;
-import org.apache.sysds.runtime.ooc.stats.OOCEventLog;
 import org.apache.sysds.runtime.ooc.stream.StreamContext;
 import org.apache.sysds.runtime.ooc.util.OOCInstructionUtils;
 import org.apache.sysds.runtime.ooc.util.OOCUtils;
 import org.apache.sysds.utils.Statistics;
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -66,9 +64,9 @@ public class GeneralMMultPrimitiveParityTest {
 	private static final int BLEN = 250;
 	private static final long WAIT_TIMEOUT_SEC = 600;
 	private static final long MIB = 1024L * 1024L;
-	private static final Map<BEvictionPolicy, String> POLICY_RESULTS = new ConcurrentHashMap<>();
 
 	private final BEvictionPolicy _bEvictionPolicy;
+	private final CacheConfig _cacheConfig;
 	private boolean _oldOOCStatistics;
 	private long _startNanos;
 
@@ -86,53 +84,51 @@ public class GeneralMMultPrimitiveParityTest {
 		}
 	}
 
-	@Parameterized.Parameters(name = "B eviction policy: {0}")
-	public static Collection<Object[]> policies() {
-		return Arrays.asList(new Object[][] {
-			{BEvictionPolicy.FORWARD},
-			{BEvictionPolicy.REVERSE},
-			{BEvictionPolicy.NEUTRAL}
-		});
+	private enum CacheConfig {
+		SMALL(16 * MIB, 8 * MIB),
+		MEDIUM(32 * MIB, 16 * MIB),
+		LARGE(64 * MIB, 32 * MIB),
+		EXTRA_LARGE(128 * MIB, 64 * MIB);
+
+		private final long _hardLimit;
+		private final long _evictionLimit;
+
+		CacheConfig(long hardLimit, long evictionLimit) {
+			_hardLimit = hardLimit;
+			_evictionLimit = evictionLimit;
+		}
 	}
 
-	public GeneralMMultPrimitiveParityTest(BEvictionPolicy bEvictionPolicy) {
+	@Parameterized.Parameters(name = "policy={0}, cache={1}")
+	public static Collection<Object[]> experiments() {
+		Collection<Object[]> experiments = new ArrayList<>();
+		for(BEvictionPolicy policy : BEvictionPolicy.values())
+			for(CacheConfig cache : CacheConfig.values())
+				experiments.add(new Object[] {policy, cache});
+		return experiments;
+	}
+
+	public GeneralMMultPrimitiveParityTest(BEvictionPolicy bEvictionPolicy, CacheConfig cacheConfig) {
 		_bEvictionPolicy = bEvictionPolicy;
+		_cacheConfig = cacheConfig;
 	}
 
 	@Before
 	public void setUp() {
 		_oldOOCStatistics = DMLScript.OOC_STATISTICS;
 		DMLScript.OOC_STATISTICS = true;
-		//Statistics.resetOOCEvictionStats();
-
-		//DMLScript.OOC_STATISTICS = true;
-		DMLScript.OOC_LOG_EVENTS = true;
-		DMLScript.OOC_LOG_PATH   = "/Users/adityapandey/Documents/OOC-Exp-Results";
-		OOCEventLog.setup(10_000_000);
 		Statistics.resetOOCEvictionStats();
-		OOCCacheManager.getGlobalCache().updateLimits(16 * MIB, 8 * MIB);
+		OOCCacheManager.getGlobalCache().updateLimits(_cacheConfig._hardLimit, _cacheConfig._evictionLimit);
 		_startNanos = System.nanoTime();
 	}
-
-	//baseline could be one tile column major and other row major
-	// what could be next future tile that is needed
-	//counter to count how many times it is visited
-	// minimize evict writes, and loadfromdisk
-	// how much would it help to keep the tiles in the disk
-	// it needs to independent of the memory cost function - invariant
-	// how can you experiment with a known vs  unknown cache sizes and how much would we loose by not knowing the cache size, not much
-	// lets say operator assumed 1gig of memory but turns out we have 100, does it break the metric, or messes up the policy
-
-	// start by fixed cache limit
 
 	@After
 	public void tearDown() {
 		try {
 			double elapsedSeconds = (System.nanoTime() - _startNanos) / 1e9;
-			String result = String.format("Policy: %s%nElapsed time: %.3f sec%n%s",
-				_bEvictionPolicy, elapsedSeconds, Statistics.displayOOCEvictionStats());
-			POLICY_RESULTS.put(_bEvictionPolicy, result);
-			System.out.println(result);
+			System.out.printf("Policy: %s, cache: %s (%d/%d MiB), elapsed: %.3f sec%n%s",
+				_bEvictionPolicy, _cacheConfig, _cacheConfig._hardLimit / MIB,
+				_cacheConfig._evictionLimit / MIB, elapsedSeconds, Statistics.displayOOCEvictionStats());
 		}
 		finally {
 			try {
@@ -141,16 +137,6 @@ public class GeneralMMultPrimitiveParityTest {
 			finally {
 				DMLScript.OOC_STATISTICS = _oldOOCStatistics;
 			}
-		}
-	}
-
-	@AfterClass
-	public static void displayPolicyComparison() {
-		System.out.println("\n========== EVICTION POLICY COMPARISON ==========");
-		for(BEvictionPolicy policy : BEvictionPolicy.values()) {
-			String result = POLICY_RESULTS.get(policy);
-			System.out.println(result != null ? result : "No result for policy " + policy);
-			System.out.println("------------------------------------------------");
 		}
 	}
 
