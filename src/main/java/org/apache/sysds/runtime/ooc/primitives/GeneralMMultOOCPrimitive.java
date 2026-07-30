@@ -73,6 +73,7 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
  * fan-out at a time. That makes this a reliable baseline and leaves scheduling, batching, and eviction policy as
  * explicit extension points for subsequent work.
  */
+
 public class GeneralMMultOOCPrimitive extends PlannableOOCPrimitive {
 	private final AggregateBinaryOperator _mmOperator;
 	private final BinaryOperator _plus;
@@ -85,6 +86,12 @@ public class GeneralMMultOOCPrimitive extends PlannableOOCPrimitive {
 	private OOCMaterializedView _bView;
 	private volatile IndexedMaterializedStoreReader<IndexedMatrixValue> _bReader;
 	private volatile ABatch _activeABatch;
+	private enum TestEvictionPolicy{
+		FORWARD, // the current utilization policy
+		BACKWARD, // a new reverse index policy
+		NEUTRAL
+	}
+	private static final TestEvictionPolicy B_EVICTION_POLICY = TestEvictionPolicy.FORWARD;
 
 	public GeneralMMultOOCPrimitive(OOCStreamable<IndexedMatrixValue> a,
 		OOCStreamable<IndexedMatrixValue> b, OOCStreamable<IndexedMatrixValue> out,
@@ -127,7 +134,15 @@ public class GeneralMMultOOCPrimitive extends PlannableOOCPrimitive {
 	 * indexes are normally needed farther in the future.
 	 */
 	protected long bEvictionScore(MatrixIndexes indexes) {
-		return bTileIndex(indexes);
+		int index = bTileIndex(indexes);
+
+		return switch(B_EVICTION_POLICY) {
+			case FORWARD -> index; // the current version which is to keep early tiles and evict future tiles later - standard baseline could be this
+			case BACKWARD -> -index; // evict early tiles and keep later tiles - bad baseline
+			case NEUTRAL -> 0; // this observes no preference, good to observe if a new policy actually improved over the undelying cache eviction policy or not
+		};
+
+		//return bTileIndex(indexes);
 	}
 
 	/** State-table eviction seam; relevant once the conservative one-A-tile throttle is relaxed. */
@@ -139,6 +154,8 @@ public class GeneralMMultOOCPrimitive extends PlannableOOCPrimitive {
 	protected long accumulatorEvictionScore(int slot) {
 		return slot;
 	}
+
+	//may want to work with offsets for example -100
 
 	@Override
 	public long getMinimumOperatingMemoryBytes() {
