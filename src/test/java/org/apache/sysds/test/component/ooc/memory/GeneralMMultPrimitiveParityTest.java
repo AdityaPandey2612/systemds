@@ -59,29 +59,36 @@ import java.util.concurrent.TimeUnit;
 @RunWith(Parameterized.class)
 public class GeneralMMultPrimitiveParityTest {
 	private static final int M = 1000;
-	private static final int K = 20000;
-	private static final int N = 50000;
+	private static final int K = 50000;
+	private static final int N = 20000;
 	private static final int BLEN = 250;
 	private static final long WAIT_TIMEOUT_SEC = 600;
 	private static final long MIB = 1024L * 1024L;
 
-	private final BEvictionPolicy _bEvictionPolicy;
 	private final CacheConfig _cacheConfig;
 	private boolean _oldOOCStatistics;
 	private long _startNanos;
 
-	private enum BEvictionPolicy {
-		FORWARD,
-		REVERSE,
-		NEUTRAL;
+	/*
+	 *   row-major: return row * colBlocks + col;
+	 *   reverse row-major: return rowBlocks * colBlocks - 1 - (row * colBlocks + col);
+	 *   column-major: return col * rowBlocks + row;
+	 *   later rows first: return row;
+	 *   later columns first: return col;
+	 *   neutral: return 0;
+	 *   protect a matrix relative to the others: subtract 1000 from its score;
+	 *   evict a matrix before the others: add 1000 to its score;
+	 */
+	private static long scoreA(long row, long col, long rowBlocks, long colBlocks) {
+		return row * colBlocks + col;
+	}
 
-		private long score(long index) {
-			return switch(this) {
-				case FORWARD -> index;
-				case REVERSE -> -index;
-				case NEUTRAL -> 0;
-			};
-		}
+	private static long scoreB(long row, long col, long rowBlocks, long colBlocks) {
+		return row * colBlocks + col;
+	}
+
+	private static long scoreC(long row, long col, long rowBlocks, long colBlocks) {
+		return (rowBlocks * colBlocks) + col - 1000;
 	}
 
 	private enum CacheConfig {
@@ -99,17 +106,15 @@ public class GeneralMMultPrimitiveParityTest {
 		}
 	}
 
-	@Parameterized.Parameters(name = "policy={0}, cache={1}")
+	@Parameterized.Parameters(name = "cache={0}")
 	public static Collection<Object[]> experiments() {
 		Collection<Object[]> experiments = new ArrayList<>();
-		for(BEvictionPolicy policy : BEvictionPolicy.values())
-			for(CacheConfig cache : CacheConfig.values())
-				experiments.add(new Object[] {policy, cache});
+		for(CacheConfig cache : CacheConfig.values())
+			experiments.add(new Object[] {cache});
 		return experiments;
 	}
 
-	public GeneralMMultPrimitiveParityTest(BEvictionPolicy bEvictionPolicy, CacheConfig cacheConfig) {
-		_bEvictionPolicy = bEvictionPolicy;
+	public GeneralMMultPrimitiveParityTest(CacheConfig cacheConfig) {
 		_cacheConfig = cacheConfig;
 	}
 
@@ -126,8 +131,7 @@ public class GeneralMMultPrimitiveParityTest {
 	public void tearDown() {
 		try {
 			double elapsedSeconds = (System.nanoTime() - _startNanos) / 1e9;
-			System.out.printf("Policy: %s, cache: %s (%d/%d MiB), elapsed: %.3f sec%n%s",
-				_bEvictionPolicy, _cacheConfig, _cacheConfig._hardLimit / MIB,
+			System.out.printf("Scores: %s, cache: %s (%d/%d MiB), elapsed: %.3f sec%n%s", _cacheConfig, _cacheConfig._hardLimit / MIB,
 				_cacheConfig._evictionLimit / MIB, elapsedSeconds, Statistics.displayOOCEvictionStats());
 		}
 		finally {
@@ -158,14 +162,29 @@ public class GeneralMMultPrimitiveParityTest {
 		// OOCInstructionUtils.matrixMultiply(a, b, out, mm, new BinaryOperator(Plus.getPlusFnObject()),
 		// 	new StreamContext(0, "general_mm").addOutStream(out));
 
-		final int bColBlocks = Math.toIntExact(OOCUtils.getNumColBlocks(b.getDataCharacteristics()));
+		final long aRowBlocks = OOCUtils.getNumRowBlocks(a.getDataCharacteristics());
+		final long aColBlocks = OOCUtils.getNumColBlocks(a.getDataCharacteristics());
+		final long bRowBlocks = OOCUtils.getNumRowBlocks(b.getDataCharacteristics());
+		final long bColBlocks = OOCUtils.getNumColBlocks(b.getDataCharacteristics());
+		final long cRowBlocks = OOCUtils.getNumRowBlocks(out.getDataCharacteristics());
+		final long cColBlocks = OOCUtils.getNumColBlocks(out.getDataCharacteristics());
 		GeneralMMultOOCPrimitive primitive = new GeneralMMultOOCPrimitive(a, b, out, mm,
 			new BinaryOperator(Plus.getPlusFnObject()),
 			new StreamContext(0, "general_mm").addOutStream(out)) {
 			@Override
 			protected long bEvictionScore(MatrixIndexes indexes) {
-				long index = (indexes.getRowIndex() - 1) * bColBlocks + indexes.getColumnIndex() - 1;
-				return _bEvictionPolicy.score(index);
+				return scoreB(indexes.getRowIndex() - 1, indexes.getColumnIndex() - 1,
+					bRowBlocks, bColBlocks);
+			}
+
+			@Override
+			protected long retainedAEvictionScore(int slot) {
+				return scoreA(slot / aColBlocks, slot % aColBlocks, aRowBlocks, aColBlocks);
+			}
+
+			@Override
+			protected long accumulatorEvictionScore(int slot) {
+				return scoreC(slot / cColBlocks, slot % cColBlocks, cRowBlocks, cColBlocks);
 			}
 		};
 		out.assignPrimitive(primitive);
@@ -173,7 +192,6 @@ public class GeneralMMultPrimitiveParityTest {
 		Assert.assertTrue(out.getPrimitive() instanceof GeneralMMultOOCPrimitive);
 		OOCMaterializedInputRequest request = out.getPrimitive().requiresMaterializedInput();
 		Assert.assertEquals(1, request.inputIndex());
-		int bRowBlocks = Math.toIntExact(OOCUtils.getNumRowBlocks(b.getDataCharacteristics()));
 		MatrixIndexes probe = new MatrixIndexes(Math.min(2, bRowBlocks), Math.min(3, bColBlocks));
 		int expectedLinearIndex = Math.toIntExact(
 			(probe.getRowIndex() - 1) * bColBlocks + probe.getColumnIndex() - 1);
