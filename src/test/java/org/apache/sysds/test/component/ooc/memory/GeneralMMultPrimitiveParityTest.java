@@ -64,8 +64,10 @@ public class GeneralMMultPrimitiveParityTest {
 	private static final int BLEN = 250;
 	private static final long WAIT_TIMEOUT_SEC = 600;
 	private static final long MIB = 1024L * 1024L;
+	private static final int NUM_EXPERIMENTS = 4;
 
 	private final CacheConfig _cacheConfig;
+	private final int _experiment;
 	private boolean _oldOOCStatistics;
 	private long _startNanos;
 
@@ -76,19 +78,20 @@ public class GeneralMMultPrimitiveParityTest {
 	 *   later rows first: return row;
 	 *   later columns first: return col;
 	 *   neutral: return 0;
-	 *   protect a matrix relative to the others: subtract 1000 from its score;
+	 *   protect a matrix relative to the others: best to keep it negative as compared to the other;
 	 *   evict a matrix before the others: add 1000 to its score;
+	 * 	  FORWARD in excel: [(row*colBlock) + col]
 	 */
 	private static long scoreA(long row, long col, long rowBlocks, long colBlocks) {
 		return row * colBlocks + col;
 	}
 
 	private static long scoreB(long row, long col, long rowBlocks, long colBlocks) {
-		return row * colBlocks + col;
+		return col * rowBlocks + row;
 	}
 
 	private static long scoreC(long row, long col, long rowBlocks, long colBlocks) {
-		return (rowBlocks * colBlocks) + col - 1000;
+		return row*colBlocks + col - rowBlocks*colBlocks;
 	}
 
 	private enum CacheConfig {
@@ -106,16 +109,26 @@ public class GeneralMMultPrimitiveParityTest {
 		}
 	}
 
-	@Parameterized.Parameters(name = "cache={0}")
+	@Parameterized.Parameters(name = "cache={0}, experiment={1}")
 	public static Collection<Object[]> experiments() {
+		return experiments(NUM_EXPERIMENTS);
+	}
+
+	static Collection<Object[]> experiments(int numberOfExperiments) {
+		if(numberOfExperiments < 1)
+			throw new IllegalArgumentException("Number of experiments must be at least one.");
+
 		Collection<Object[]> experiments = new ArrayList<>();
-		for(CacheConfig cache : CacheConfig.values())
-			experiments.add(new Object[] {cache});
+		for(CacheConfig cache : CacheConfig.values()) {
+			for(int experiment = 1; experiment <= numberOfExperiments; experiment++)
+				experiments.add(new Object[] {cache, experiment});
+		}
 		return experiments;
 	}
 
-	public GeneralMMultPrimitiveParityTest(CacheConfig cacheConfig) {
+	public GeneralMMultPrimitiveParityTest(CacheConfig cacheConfig, int experiment) {
 		_cacheConfig = cacheConfig;
+		_experiment = experiment;
 	}
 
 	@Before
@@ -131,8 +144,9 @@ public class GeneralMMultPrimitiveParityTest {
 	public void tearDown() {
 		try {
 			double elapsedSeconds = (System.nanoTime() - _startNanos) / 1e9;
-			System.out.printf("Scores: %s, cache: %s (%d/%d MiB), elapsed: %.3f sec%n%s", _cacheConfig, _cacheConfig._hardLimit / MIB,
-				_cacheConfig._evictionLimit / MIB, elapsedSeconds, Statistics.displayOOCEvictionStats());
+			System.out.printf("Cache: %s (%d/%d MiB), experiment: %d, elapsed: %.3f sec%n%s",
+				_cacheConfig, _cacheConfig._hardLimit / MIB, _cacheConfig._evictionLimit / MIB, _experiment,
+				elapsedSeconds, Statistics.displayOOCEvictionStats());
 		}
 		finally {
 			try {

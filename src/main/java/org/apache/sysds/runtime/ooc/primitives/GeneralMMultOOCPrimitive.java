@@ -166,22 +166,23 @@ public class GeneralMMultOOCPrimitive extends PlannableOOCPrimitive {
 	@Override
 	public void inferPatterns() {
 		_pattern = OOCAccessPattern.ROW_MAJOR;
-		for(OOCPrimitive child : getChildren()) {
-			if(!child.hasStartedExecution())
-				child.requestPattern(OOCAccessPattern.ROW_MAJOR);
-		}
+		requestInputPatterns();
 		inferPatterns(getParents());
 	}
 
 	@Override
 	public void requestPattern(OOCAccessPattern accessPattern) {
-		if(_pattern == OOCAccessPattern.ROW_MAJOR)
-			return;
 		_pattern = OOCAccessPattern.ROW_MAJOR;
-		for(OOCPrimitive child : getChildren()) {
-			if(!child.hasStartedExecution())
-				child.requestPattern(OOCAccessPattern.ROW_MAJOR);
-		}
+		requestInputPatterns();
+	}
+
+	private void requestInputPatterns() {
+		OOCPrimitive aPrimitive = safePrimitive(getAStreamable());
+		OOCPrimitive bPrimitive = safePrimitive(getBStreamable());
+		if(aPrimitive != null && !aPrimitive.hasStartedExecution())
+			aPrimitive.requestPattern(OOCAccessPattern.COL_MAJOR);
+		if(bPrimitive != null && bPrimitive != aPrimitive && !bPrimitive.hasStartedExecution())
+			bPrimitive.requestPattern(OOCAccessPattern.ROW_MAJOR);
 	}
 
 	@Override
